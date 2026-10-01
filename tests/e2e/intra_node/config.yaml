@@ -1,0 +1,32 @@
+name: e2e/intra_node
+network_name: e2e-intra-node-net
+startup_timeout: 300.0
+wiremock: true
+
+mysql:
+  databases:
+    - sort_mistake
+    - sort_service
+  check_tables:
+    - sort_mistake.intra_hub_nodes
+    - sort_service.intra_hub_nodes
+
+kafka:
+  topics:
+    - dev-sort-mistake-evt-nodes
+    - hub-events-dev-proto-topic
+    - dev-hub-evt-shipment-failed-parcel-update
+
+redis_instances:
+  - redis-sort-mistake
+  - redis-sort
+
+services:
+  - name: sort-mistake
+    endpoint_key: sort-mistake
+    expose_port: "9000/tcp"
+    dump_logs_on_failure: true
+  - name: sort-service
+    endpoint_key: sort-service
+    expose_port: "9000/tcp"
+    dump_logs_on_failure: true

@@ -1,0 +1,23 @@
+name: producer/intra_node
+network_name: producer-intra-node-net
+startup_timeout: 300.0
+wiremock: true
+
+mysql:
+  databases:
+    - sort_mistake
+  check_tables:
+    - sort_mistake.intra_hub_nodes
+
+kafka:
+  topics:
+    - dev-sort-mistake-evt-nodes
+
+redis_instances:
+  - redis-sort-mistake
+
+services:
+  - name: sort-mistake
+    endpoint_key: sort-mistake
+    expose_port: "9000/tcp"
+    dump_logs_on_failure: true
