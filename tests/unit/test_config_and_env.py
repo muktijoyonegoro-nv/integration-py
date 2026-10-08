@@ -14,6 +14,7 @@ from harness.config import (
 )
 from harness.env.podman import get_docker_client, setup_podman_environment
 from harness.env.prune import default_labels, prune_managed_containers
+from harness.runner.monitor import ContainerMetrics
 
 
 def test_service_name_to_env_key():
@@ -64,11 +65,50 @@ def test_find_config_file_traversal(tmp_path: Path):
     assert found.resolve() == cfg_file.resolve()
 
 
-def test_default_labels():
+def test_default_labels(monkeypatch):
+    monkeypatch.setenv("HARNESS_RUN_ID", "run-123")
     labels = default_labels("sort-mistake")
     assert labels["harness.managed"] == "true"
     assert labels["harness.suite"] == "integration-py"
     assert labels["harness.service"] == "sort-mistake"
+    assert labels["harness.run_id"] == "run-123"
+
+
+def test_container_metrics_only_counts_matching_run_id(monkeypatch):
+    metrics = ContainerMetrics(run_id="run-123")
+    metadata = {
+        "ours": ("redis:7-alpine", "redis", "run-123"),
+        "other": ("postgres:14", "postgres", "another-run"),
+    }
+    monkeypatch.setattr(metrics, "_inspect_container", lambda *_args: metadata[_args[-1]])
+
+    stats = [
+        {
+            "id": "ours",
+            "name": "test-redis",
+            "mem_usage": "10 MiB / 1 GiB",
+            "cpu_percent": "2.5%",
+            "pids": "3",
+            "net_io": "1 MiB / 2 MiB",
+            "block_io": "3 MiB / 4 MiB",
+        },
+        {
+            "id": "other",
+            "name": "unrelated-postgres",
+            "mem_usage": "900 MiB / 1 GiB",
+            "cpu_percent": "99.0%",
+            "pids": "99",
+            "net_io": "9 MiB / 9 MiB",
+            "block_io": "9 MiB / 9 MiB",
+        },
+    ]
+
+    metrics.update(stats, "podman", "")
+
+    assert set(metrics.containers) == {"ours"}
+    assert metrics.peak_total_mem_bytes == 10 * 1024 * 1024
+    assert metrics.peak_total_cpu == 2.5
+    assert metrics.peak_concurrent_pids == 3
 
 
 def test_podman_socket_and_docker_client():

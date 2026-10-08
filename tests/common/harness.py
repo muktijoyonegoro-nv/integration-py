@@ -9,9 +9,9 @@ from typing import Any, Dict, List, Optional
 
 from harness.catalog import SortMistake, SortService
 from harness.catalog.service import AppContainer, ServiceDefinition, start_service
-from harness.config import load_config
-from harness.env.builder import DatabaseMigration, EnvironmentBuilder, KafkaConfig, MySQLConfig
+from harness.env.builder import DatabaseMigration, EnvironmentBuilder
 from harness.env.environment import TestEnvironment
+from harness.env.shared import SharedTestEnvironment
 from tests.common.connectivity import assert_connectivity
 from tests.common.schema import ScenarioConfig, load_scenario_config
 
@@ -30,6 +30,7 @@ class Scenario:
     config: ScenarioConfig
     env: TestEnvironment
     apps: Dict[str, AppContainer] = field(default_factory=dict)
+    shared_infra: Optional[SharedTestEnvironment] = None
 
     @property
     def db(self):
@@ -54,9 +55,13 @@ class Scenario:
 
     def flush_redis(self) -> None:
         """Flushes all redis client instances configured in this scenario."""
+        flushed = set()
         for client in self.env.redis_clients.values():
+            if id(client) in flushed:
+                continue
             try:
                 client.flushall()
+                flushed.add(id(client))
             except Exception:
                 pass
 
@@ -82,43 +87,59 @@ class Scenario:
 
     def teardown(self) -> None:
         """Tears down all containers, networks, and connections."""
-        self.env.teardown()
+        if self.shared_infra is None:
+            self.env.teardown()
+            return
+
+        for app in self.apps.values():
+            try:
+                app.container.remove(force=True, v=True)
+            except Exception as exc:
+                logger.warning("Error terminating app container: %s", exc)
+            finally:
+                if app.container in self.env.app_containers:
+                    self.env.app_containers.remove(app.container)
 
 
 def setup_scenario(
     config_path: Path | str,
     subtests: Optional[Any] = None,
+    shared_infra: Optional[SharedTestEnvironment] = None,
 ) -> Scenario:
     """Parses a scenario config.yaml, sets up backing infrastructure, runs connectivity checks,
 
     and launches requested microservices.
     """
     cfg = load_scenario_config(config_path)
-    net_name = cfg.network_name or (cfg.name.replace("/", "-").replace("_", "-") + "-net")
-    builder = EnvironmentBuilder(network_name=net_name)
+    if shared_infra is not None:
+        shared_infra.prepare_scenario(cfg)
+        env = shared_infra.env
+    else:
+        net_name = cfg.network_name or (cfg.name.replace("/", "-").replace("_", "-") + "-net")
+        builder = EnvironmentBuilder(network_name=net_name)
 
-    if cfg.mysql.databases:
-        migrations = [
-            DatabaseMigration(database=m.database, migration_dir=m.migration_dir)
-            for m in cfg.mysql.migrations
-        ]
-        builder.with_mysql(
-            databases=cfg.mysql.databases,
-            check_tables=cfg.mysql.check_tables,
-            migrations=migrations,
-        )
+        if cfg.mysql.databases:
+            migrations = [
+                DatabaseMigration(database=m.database, migration_dir=m.migration_dir)
+                for m in cfg.mysql.migrations
+            ]
+            builder.with_mysql(
+                databases=cfg.mysql.databases,
+                check_tables=cfg.mysql.check_tables,
+                migrations=migrations,
+            )
 
-    if cfg.kafka.topics:
-        builder.with_kafka(topics=cfg.kafka.topics)
+        if cfg.kafka.topics:
+            builder.with_kafka(topics=cfg.kafka.topics)
 
-    for alias in cfg.redis_instances:
-        builder.with_redis_instance(alias)
+        for alias in cfg.redis_instances:
+            builder.with_redis_instance(alias)
 
-    if cfg.wiremock:
-        builder.with_wiremock()
+        if cfg.wiremock:
+            builder.with_wiremock()
 
-    env = builder.build()
-    scenario = Scenario(config=cfg, env=env)
+        env = builder.build()
+    scenario = Scenario(config=cfg, env=env, shared_infra=shared_infra)
 
     try:
         # Launch application containers

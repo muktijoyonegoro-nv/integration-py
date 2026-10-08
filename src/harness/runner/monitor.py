@@ -102,14 +102,17 @@ class ContainerInfo:
     image: str
     short_name: str
     service: str = ""
+    run_id: str = ""
 
 
 class ContainerMetrics:
     """Tracks aggregated container resource metrics over time."""
 
-    def __init__(self) -> None:
+    def __init__(self, run_id: Optional[str] = None) -> None:
         self.lock = threading.Lock()
+        self.run_id = run_id
         self.containers: Dict[str, ContainerInfo] = {}
+        self.ignored_container_ids: set[str] = set()
         self.peak_container_mem: Dict[str, int] = {}
         self.peak_total_mem_bytes: int = 0
         self.peak_total_cpu: float = 0.0
@@ -134,15 +137,26 @@ class ContainerMetrics:
                 if not cid:
                     continue
 
+                if cid in self.ignored_container_ids:
+                    continue
+
                 if cid not in self.containers:
-                    img, svc = self._inspect_container(podman_bin, podman_url, cid)
-                    short_name = extract_image_short_name(img) or extract_image_short_name(e.get("name", ""))
+                    img, svc, container_run_id = self._inspect_container(
+                        podman_bin, podman_url, cid
+                    )
+                    if self.run_id and container_run_id != self.run_id:
+                        self.ignored_container_ids.add(cid)
+                        continue
+                    short_name = extract_image_short_name(img) or extract_image_short_name(
+                        e.get("name", "")
+                    )
                     self.containers[cid] = ContainerInfo(
                         id=cid,
                         name=e.get("name", ""),
                         image=img,
                         short_name=short_name,
                         service=svc,
+                        run_id=container_run_id,
                     )
 
                 # Memory: "4.231MB / 3.793GB"
@@ -197,21 +211,31 @@ class ContainerMetrics:
             if total_block_write > self.latest_block_write:
                 self.latest_block_write = total_block_write
 
-    def _inspect_container(self, podman_bin: str, podman_url: str, cid: str) -> Tuple[str, str]:
+    def _inspect_container(
+        self, podman_bin: str, podman_url: str, cid: str
+    ) -> Tuple[str, str, str]:
         cmd = [podman_bin]
         if podman_url:
             cmd.extend(["--url", podman_url])
-        cmd.extend(["inspect", cid, "--format", '{{.Config.Image}}|{{index .Config.Labels "harness.service"}}'])
+        cmd.extend(
+            [
+                "inspect",
+                cid,
+                "--format",
+                '{{.Config.Image}}|{{index .Config.Labels "harness.service"}}|{{index .Config.Labels "harness.run_id"}}',
+            ]
+        )
         try:
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=2.0)
             if res.returncode == 0:
                 parts = res.stdout.strip().split("|")
                 img = parts[0] if len(parts) > 0 else ""
                 svc = parts[1] if len(parts) > 1 else ""
-                return img, svc
+                run_id = parts[2] if len(parts) > 2 else ""
+                return img, svc, run_id
         except Exception:
             pass
-        return "", ""
+        return "", "", ""
 
 
 def get_dir_size(path: Path | str) -> int:

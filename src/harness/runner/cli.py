@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from typing import List
 
 from harness.config import load_config
@@ -42,7 +43,8 @@ def run_test_runner(args: List[str]) -> int:
     init_workspace_size = get_dir_size(".")
     init_disk_free = get_disk_free(".")
 
-    metrics = ContainerMetrics()
+    run_id = uuid.uuid4().hex
+    metrics = ContainerMetrics(run_id=run_id)
     stop_event = threading.Event()
 
     def sample_loop():
@@ -73,7 +75,9 @@ def run_test_runner(args: List[str]) -> int:
     signal.signal(signal.SIGTERM, sig_handler)
 
     try:
-        proc = subprocess.Popen([target_cmd] + target_args)
+        child_env = os.environ.copy()
+        child_env["HARNESS_RUN_ID"] = run_id
+        proc = subprocess.Popen([target_cmd] + target_args, env=child_env)
         proc.wait()
         exit_code = proc.returncode
     except FileNotFoundError as e:
