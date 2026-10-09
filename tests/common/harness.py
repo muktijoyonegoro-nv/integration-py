@@ -50,17 +50,21 @@ class Scenario:
     def truncate_tables(self, tables: Optional[List[str]] = None) -> None:
         """Truncates tables in the scenario's MySQL database."""
         if self.db:
-            from harness.testutil.db import truncate_tables
-            truncate_tables(self.db, tables=tables)
+            from harness.infra.mysql import truncate_tables
+
+            target_tables = tables if tables is not None else self.config.mysql.check_tables
+            truncate_tables(self.db, tables=target_tables)
 
     def flush_redis(self) -> None:
         """Flushes all redis client instances configured in this scenario."""
+        from harness.infra.redis import flush_redis
+
         flushed = set()
         for client in self.env.redis_clients.values():
             if id(client) in flushed:
                 continue
             try:
-                client.flushall()
+                flush_redis(client)
                 flushed.add(id(client))
             except Exception:
                 pass

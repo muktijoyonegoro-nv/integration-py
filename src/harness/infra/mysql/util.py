@@ -4,24 +4,10 @@ from __future__ import annotations
 
 import re
 import time
-from dataclasses import dataclass
-from datetime import datetime
-from typing import List, Optional
+from collections.abc import Sequence
 from urllib.parse import urlparse
 
 import pymysql
-
-
-@dataclass
-class IntraHubNodeRecord:
-    id: int
-    system_id: str
-    hub_id: int
-    type: str
-    ref_hub_id: int
-    name: str
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
 
 
 def parse_mysql_dsn(dsn: str) -> dict:
@@ -51,7 +37,7 @@ def connect_mysql(dsn: str, timeout: float = 10.0) -> pymysql.connections.Connec
     """Establishes and tests a connection to MySQL, retrying until timeout."""
     params = parse_mysql_dsn(dsn)
     deadline = time.time() + timeout
-    last_err: Optional[Exception] = None
+    last_err: Exception | None = None
 
     while time.time() < deadline:
         try:
@@ -67,20 +53,17 @@ def connect_mysql(dsn: str, timeout: float = 10.0) -> pymysql.connections.Connec
             )
             conn.ping(reconnect=True)
             return conn
-        except Exception as e:
+        except (pymysql.MySQLError, OSError) as e:
             last_err = e
             time.sleep(0.3)
 
     raise ConnectionError(f"Failed to connect to MySQL at {dsn} within {timeout}s: {last_err}")
 
 
-def truncate_tables(conn: pymysql.connections.Connection, tables: Optional[List[str]] = None) -> None:
+def truncate_tables(conn: pymysql.connections.Connection, tables: Sequence[str]) -> None:
     """Truncates specified tables across databases, disabling foreign key checks during truncation."""
     if not tables:
-        tables = [
-            "sort_mistake.intra_hub_nodes",
-            "sort_service.intra_hub_nodes",
-        ]
+        return
 
     with conn.cursor() as cursor:
         cursor.execute("SET FOREIGN_KEY_CHECKS = 0;")
@@ -95,31 +78,3 @@ def truncate_tables(conn: pymysql.connections.Connection, tables: Optional[List[
                     raise
         finally:
             cursor.execute("SET FOREIGN_KEY_CHECKS = 1;")
-
-
-def query_intra_hub_node(
-    conn: pymysql.connections.Connection,
-    database_name: str,
-    node_id: int,
-) -> Optional[IntraHubNodeRecord]:
-    """Queries an intra_hub_node by ID from the specified database."""
-    query = f"""
-        SELECT id, system_id, hub_id, type, ref_hub_id, name, created_at, updated_at
-        FROM {database_name}.intra_hub_nodes
-        WHERE id = %s
-    """
-    with conn.cursor() as cursor:
-        cursor.execute(query, (node_id,))
-        row = cursor.fetchone()
-        if not row:
-            return None
-        return IntraHubNodeRecord(
-            id=row["id"],
-            system_id=row["system_id"],
-            hub_id=row["hub_id"],
-            type=row["type"],
-            ref_hub_id=row["ref_hub_id"],
-            name=row["name"],
-            created_at=row.get("created_at"),
-            updated_at=row.get("updated_at"),
-        )

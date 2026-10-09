@@ -1,5 +1,5 @@
-name: producer/intra_node
-network_name: producer-intra-node-net
+name: sort_mistake/publish_sort_node
+network_name: sort-mistake-publish-node-net
 startup_timeout: 300.0
 wiremock: true
 

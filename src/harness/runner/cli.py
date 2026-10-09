@@ -10,7 +10,6 @@ import sys
 import threading
 import time
 import uuid
-from typing import List
 
 from harness.config import load_config
 from harness.env.podman import setup_podman_environment
@@ -24,7 +23,7 @@ from harness.runner.monitor import (
 from harness.runner.reporter import ReportData, print_report
 
 
-def run_test_runner(args: List[str]) -> int:
+def run_test_runner(args: list[str]) -> int:
     """Wraps target command execution with real-time background telemetry sampling."""
     if not args:
         print("Usage: test-runner <command> [args...]")
@@ -125,18 +124,12 @@ def run_test_runner(args: List[str]) -> int:
 
 
 def pull_images_cli() -> None:
-    """Pre-pulls all required external images."""
+    """Pre-pulls all required external images dynamically discovered from config."""
     cfg = load_config()
     setup_podman_environment()
     podman_bin = cfg.get_podman_bin()
 
-    images_to_pull = [
-        cfg.get_image("mysql", "mysql:8.0"),
-        cfg.get_image("redis", "redis:7-alpine"),
-        cfg.get_image("kafka", "confluentinc/confluent-local:7.6.0"),
-        cfg.get_image("wiremock", "docker.io/wiremock/wiremock:3.5.2"),
-        cfg.get_image("flyway", "docker.io/flyway/flyway:11-alpine"),
-    ]
+    images_to_pull = cfg.get_backing_images()
 
     print("Pre-pulling required container images...")
     for img in images_to_pull:

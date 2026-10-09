@@ -1,4 +1,4 @@
-"""Consumer-isolated contract test scenario."""
+"""Consumer-isolated contract test scenario for sort-service."""
 
 import time
 
@@ -9,17 +9,16 @@ from harness.contract import (
     new_sort_node_deleted_event,
     new_sort_node_updated_event,
 )
-from harness.testutil import (
-    eventually,
-    get_sort_service_intra_node,
-    publish_sort_node_events,
-    query_intra_hub_node,
-)
+from harness.infra.kafka import publish_proto
 from proto.protos_sort.sortmistake import sort_node_pb2
+from tests.common.polling import eventually
+from tests.sort_service.consume_sort_node.util.db import query_intra_hub_node
+from tests.sort_service.consume_sort_node.util.redis import get_sort_service_intra_node
 
 SORT_MISTAKE_NODES_TOPIC = "dev-sort-mistake-evt-nodes"
 
 
+@pytest.mark.sort_service
 @pytest.mark.consumer
 def test_sort_service_consumer_event_ingestion(scenario):
     redis_sort = scenario.redis_client("redis-sort")
@@ -45,16 +44,22 @@ def test_sort_service_consumer_event_ingestion(scenario):
         name=node_name,
         node_type=sort_node_pb2.NodeType.NODE_TYPE_INTRA_MID,
     )
-    publish_sort_node_events(scenario.kafka_broker, SORT_MISTAKE_NODES_TOPIC, created_evt)
+    publish_proto(
+        scenario.kafka_broker,
+        
+        SORT_MISTAKE_NODES_TOPIC,
+        
+        created_evt,
+        
+        key=created_evt.system_id,
+    )
 
     def check_created_sync():
-        record = query_intra_hub_node(scenario.db, "sort_service", node_id)
+        record = query_intra_hub_node(scenario.db, node_id)
         if not record or record.name != node_name:
             return False
         cached_proto = get_sort_service_intra_node(redis_sort, system_id, hub_id, node_id)
-        if not cached_proto or cached_proto.name != node_name:
-            return False
-        return True
+        return bool(cached_proto and cached_proto.name == node_name)
 
     eventually(
         check_created_sync,
@@ -72,16 +77,22 @@ def test_sort_service_consumer_event_ingestion(scenario):
         name=updated_node_name,
         node_type=sort_node_pb2.NodeType.NODE_TYPE_INTRA_MID,
     )
-    publish_sort_node_events(scenario.kafka_broker, SORT_MISTAKE_NODES_TOPIC, updated_evt)
+    publish_proto(
+        scenario.kafka_broker,
+        
+        SORT_MISTAKE_NODES_TOPIC,
+        
+        updated_evt,
+        
+        key=updated_evt.system_id,
+    )
 
     def check_updated_sync():
-        record = query_intra_hub_node(scenario.db, "sort_service", node_id)
+        record = query_intra_hub_node(scenario.db, node_id)
         if not record or record.name != updated_node_name:
             return False
         cached_proto = get_sort_service_intra_node(redis_sort, system_id, hub_id, node_id)
-        if not cached_proto or cached_proto.name != updated_node_name:
-            return False
-        return True
+        return bool(cached_proto and cached_proto.name == updated_node_name)
 
     eventually(
         check_updated_sync,
@@ -97,16 +108,22 @@ def test_sort_service_consumer_event_ingestion(scenario):
         hub_id=hub_id,
         node_id=node_id,
     )
-    publish_sort_node_events(scenario.kafka_broker, SORT_MISTAKE_NODES_TOPIC, deleted_evt)
+    publish_proto(
+        scenario.kafka_broker,
+        
+        SORT_MISTAKE_NODES_TOPIC,
+        
+        deleted_evt,
+        
+        key=deleted_evt.system_id,
+    )
 
     def check_deleted_sync():
-        record = query_intra_hub_node(scenario.db, "sort_service", node_id)
+        record = query_intra_hub_node(scenario.db, node_id)
         if record is not None:
             return False
         cached_proto = get_sort_service_intra_node(redis_sort, system_id, hub_id, node_id)
-        if cached_proto is not None:
-            return False
-        return True
+        return cached_proto is None
 
     eventually(
         check_deleted_sync,
@@ -122,8 +139,16 @@ def test_sort_service_consumer_event_ingestion(scenario):
         hub_id=hub_id,
         node_id=node_id,
     )
-    publish_sort_node_events(scenario.kafka_broker, SORT_MISTAKE_NODES_TOPIC, duplicate_delete_evt)
+    publish_proto(
+        scenario.kafka_broker,
+        
+        SORT_MISTAKE_NODES_TOPIC,
+        
+        duplicate_delete_evt,
+        
+        key=duplicate_delete_evt.system_id,
+    )
 
     time.sleep(1.0)
-    record = query_intra_hub_node(scenario.db, "sort_service", node_id)
+    record = query_intra_hub_node(scenario.db, node_id)
     assert record is None, "record must remain deleted after repeated delete event"

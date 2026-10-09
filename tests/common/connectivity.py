@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from harness.testutil.kafka import ensure_topic
+from harness.infra.kafka import ensure_topic
 
 if TYPE_CHECKING:
     from tests.common.harness import Scenario

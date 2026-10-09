@@ -52,7 +52,8 @@ pythonpath = ["src", ".", "proto"]
 addopts = "-v --tb=short"
 timeout = 900
 markers = [
-    "e2e: End-to-end integration tests across all microservices",
+    "sort_mistake: Contract tests for sort-mistake service",
+    "sort_service: Contract tests for sort-service service",
     "producer: Producer-isolated contract tests",
     "consumer: Consumer-isolated contract tests",
 ]

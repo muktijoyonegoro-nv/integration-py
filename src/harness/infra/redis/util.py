@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import time
-from typing import Optional
 
 import redis
-
-from proto.protos_sort.sortmistake import sort_node_pb2
+from google.protobuf.message import Message
 
 
 def connect_redis(addr: str, timeout: float = 10.0) -> redis.Redis:
@@ -21,13 +19,13 @@ def connect_redis(addr: str, timeout: float = 10.0) -> redis.Redis:
 
     client = redis.Redis(host=host, port=port, decode_responses=False)
     deadline = time.time() + timeout
-    last_err: Optional[Exception] = None
+    last_err: Exception | None = None
 
     while time.time() < deadline:
         try:
             if client.ping():
                 return client
-        except Exception as e:
+        except (redis.ConnectionError, redis.TimeoutError, OSError) as e:
             last_err = e
             time.sleep(0.3)
 
@@ -39,19 +37,17 @@ def flush_redis(client: redis.Redis) -> None:
     client.flushdb()
 
 
-def get_sort_service_intra_node(
+def get_proto_hash[T: Message](
     client: redis.Redis,
-    system_id: str,
-    hub_id: int,
-    node_id: int,
-) -> Optional[sort_node_pb2.SortNode]:
-    """Retrieves and deserializes a SortNode protobuf from Redis hash: intra_node_<sys>_<hub>."""
-    key = f"intra_node_{system_id}_{hub_id}"
-    field = str(node_id)
+    key: str,
+    field: str,
+    proto_cls: type[T],
+) -> T | None:
+    """Retrieves and deserializes a Protobuf message from a Redis hash field."""
     val = client.hget(key, field)
     if not val:
         return None
 
-    node = sort_node_pb2.SortNode()
-    node.ParseFromString(val)
-    return node
+    msg = proto_cls()
+    msg.ParseFromString(val)
+    return msg

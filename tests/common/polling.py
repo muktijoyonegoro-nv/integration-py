@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import time
-from typing import Callable, TypeVar
-
-T = TypeVar("T")
+from collections.abc import Callable
 
 
-def eventually(
+def eventually[T](
     predicate_fn: Callable[[], T],
     timeout: float = 15.0,
     interval: float = 0.2,
@@ -25,7 +23,7 @@ def eventually(
             if val:
                 return val
             last_val = val
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             last_err = e
         time.sleep(interval)
 

@@ -82,21 +82,20 @@ proto-gen:
 test target="tests" run="" timeout="15m":
     uv run test-runner uv run pytest -p no:warnings -s {{target}} {{ if run != "" { "-k " + run } else { "" } }}
 
-# Full E2E suite shortcut
-test-e2e timeout="10m":
-    just test "tests/e2e" "" {{timeout}}
+# Sort-mistake scenario shortcut
+test-sort-mistake timeout="5m":
+    just test "tests/sort_mistake" "" {{timeout}}
 
-# Intra-Node E2E scenario shortcut
-test-intra-node timeout="5m":
-    just test "tests/e2e/intra_node" "" {{timeout}}
+# Sort-service scenario shortcut
+test-sort-service timeout="5m":
+    just test "tests/sort_service" "" {{timeout}}
 
-# Isolated Producer scenario shortcut
+# Aliases for producer and consumer suites
 test-producer timeout="5m":
-    just test "tests/producer/intra_node" "" {{timeout}}
+    just test "tests/sort_mistake/publish_sort_node" "" {{timeout}}
 
-# Isolated Consumer scenario shortcut
 test-consumer timeout="5m":
-    just test "tests/consumer/intra_node" "" {{timeout}}
+    just test "tests/sort_service/consume_sort_node" "" {{timeout}}
 
 # Run tests and output JUnit XML report in reports/junit.xml
 test-report target="tests" run="" timeout="15m":

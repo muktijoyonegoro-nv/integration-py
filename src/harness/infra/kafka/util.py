@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Any, List, Optional
+from typing import Any
 
 from confluent_kafka import Consumer, KafkaError, Producer
 from confluent_kafka.admin import AdminClient, NewTopic
 from google.protobuf.message import Message
-
-from proto.protos_sort.sortmistake import sort_node_pb2
 
 
 def ensure_topic(
@@ -26,9 +24,11 @@ def ensure_topic(
     if topic in metadata.topics and metadata.topics[topic].error is None:
         return
 
-    new_topics = [NewTopic(topic, num_partitions=num_partitions, replication_factor=replication_factor)]
+    new_topics = [
+        NewTopic(topic, num_partitions=num_partitions, replication_factor=replication_factor)
+    ]
     fs = admin.create_topics(new_topics, request_timeout=timeout)
-    for t, f in fs.items():
+    for f in fs.values():
         try:
             f.result()
         except Exception as e:
@@ -40,7 +40,7 @@ def ensure_topic(
 class KafkaProtoReader:
     """Consumes protobuf messages from the earliest offset with an isolated consumer group."""
 
-    def __init__(self, broker_addr: str, topic: str, group_id: Optional[str] = None) -> None:
+    def __init__(self, broker_addr: str, topic: str, group_id: str | None = None) -> None:
         self.broker_addr = broker_addr
         self.topic = topic
         self.group_id = group_id or f"test-group-{uuid.uuid4().hex[:8]}"
@@ -66,36 +66,42 @@ class KafkaProtoReader:
             return msg.value()
         raise TimeoutError(f"Timed out waiting for message on topic [{self.topic}] after {timeout}s")
 
-    def read_next_sort_node_event(self, timeout: float = 15.0) -> sort_node_pb2.SortNodeEvents:
-        """Reads the next message and deserializes it into SortNodeEvents."""
+    def read_next_proto[T: Message](self, proto_cls: type[T], timeout: float = 15.0) -> T:
+        """Reads the next message and deserializes it into the specified Protobuf class."""
         val = self.read_next(timeout)
-        events = sort_node_pb2.SortNodeEvents()
-        events.ParseFromString(val)
-        return events
+        msg = proto_cls()
+        msg.ParseFromString(val)
+        return msg
 
     def close(self) -> None:
         self.consumer.close()
 
 
-def publish_sort_node_events(
+def publish_proto(
     broker_addr: str,
     topic: str,
-    events: sort_node_pb2.SortNodeEvents,
+    message: Message,
+    key: str | bytes | None = None,
     timeout: float = 10.0,
 ) -> None:
-    """Serializes and produces a SortNodeEvents message to the specified topic."""
+    """Serializes and produces a Protobuf message to the specified topic."""
     producer = Producer({"bootstrap.servers": broker_addr})
-    key = events.system_id.encode("utf-8") if events.system_id else b""
-    val = events.SerializeToString()
+    if key is None:
+        key_bytes = b""
+    elif isinstance(key, str):
+        key_bytes = key.encode("utf-8")
+    else:
+        key_bytes = key
+    val = message.SerializeToString()
 
-    delivery_err: Optional[Exception] = None
+    delivery_err: Exception | None = None
 
     def on_delivery(err: Any, msg: Any) -> None:
         nonlocal delivery_err
         if err:
             delivery_err = RuntimeError(f"Delivery failed: {err}")
 
-    producer.produce(topic=topic, key=key, value=val, callback=on_delivery)
+    producer.produce(topic=topic, key=key_bytes, value=val, callback=on_delivery)
     producer.flush(timeout=timeout)
     if delivery_err:
         raise delivery_err

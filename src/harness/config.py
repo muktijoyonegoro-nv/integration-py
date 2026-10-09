@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
 
 import yaml
 from dotenv import load_dotenv
@@ -28,7 +27,7 @@ def service_name_to_env_key(name: str) -> str:
 
 class PodmanConfig(BaseModel):
     bin: str = Field(default=DEFAULT_PODMAN_BIN)
-    images: Dict[str, str] = Field(default_factory=lambda: dict(DEFAULT_BACKING_IMAGES))
+    images: dict[str, str] = Field(default_factory=lambda: dict(DEFAULT_BACKING_IMAGES))
 
 
 class Config(BaseModel):
@@ -83,8 +82,15 @@ class Config(BaseModel):
             return fallback
         return DEFAULT_BACKING_IMAGES.get(key, "")
 
+    def get_backing_images(self) -> list[str]:
+        """Returns all distinct backing images declared in config.yaml, falling back to defaults."""
+        images = dict(DEFAULT_BACKING_IMAGES)
+        if self.podman.images:
+            images.update(self.podman.images)
+        return list(dict.fromkeys(images.values()))
 
-def find_config_file(start_dir: Optional[Path | str] = None) -> Path:
+
+def find_config_file(start_dir: Path | str | None = None) -> Path:
     """Searches for config.yaml starting from start_dir (or current working directory) and walking upwards."""
     env_path = os.getenv("CONFIG_PATH")
     if env_path:
@@ -102,7 +108,7 @@ def find_config_file(start_dir: Optional[Path | str] = None) -> Path:
     return Path.cwd() / "config.yaml"
 
 
-def find_env_file(start_dir: Optional[Path | str] = None) -> Optional[Path]:
+def find_env_file(start_dir: Path | str | None = None) -> Path | None:
     """Searches for .env starting from start_dir (or current working directory) and walking upwards."""
     curr = Path(start_dir).resolve() if start_dir else Path.cwd().resolve()
     while True:

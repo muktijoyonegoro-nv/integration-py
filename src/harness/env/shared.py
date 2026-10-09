@@ -11,9 +11,9 @@ from confluent_kafka.admin import AdminClient
 
 from harness.env.builder import DatabaseMigration, EnvironmentBuilder
 from harness.env.environment import TestEnvironment
-from harness.testutil.db import connect_mysql
-from harness.testutil.kafka import ensure_topic
-from harness.testutil.mock_aaa import setup_wiremock_aaa
+from harness.infra.kafka import ensure_topic
+from harness.infra.mysql import connect_mysql
+from harness.infra.wiremock import setup_wiremock_aaa
 
 logger = logging.getLogger(__name__)
 

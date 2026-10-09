@@ -1,4 +1,4 @@
-"""Full E2E multi-service integration test scenario."""
+"""Producer-isolated contract test scenario for sort-mistake."""
 
 import uuid
 
@@ -10,24 +10,20 @@ from harness.contract import (
     assert_node_deleted_contract,
     assert_node_updated_contract,
 )
-from harness.testutil import (
-    KafkaProtoReader,
-    eventually,
-    get_sort_service_intra_node,
-    query_intra_hub_node,
-)
+from harness.infra.kafka import KafkaProtoReader
 from proto.protos_sort.sortmistake import sort_node_pb2
+from tests.common.polling import eventually
+from tests.sort_mistake.publish_sort_node.util.db import query_intra_hub_node
 
 SORT_MISTAKE_NODES_TOPIC = "dev-sort-mistake-evt-nodes"
 
 
-@pytest.mark.e2e
-def test_sort_task_pipeline_full_crud_cycle(scenario):
+@pytest.mark.sort_mistake
+@pytest.mark.producer
+def test_sort_mistake_producer_contract_pipeline(scenario):
     sort_mistake_base_url = scenario.endpoint("sort-mistake")
     redis_mistake = scenario.redis_client("redis-sort-mistake")
-    redis_sort = scenario.redis_client("redis-sort")
     assert redis_mistake is not None, "redis-sort-mistake client must not be None"
-    assert redis_sort is not None, "redis-sort client must not be None"
 
     # 1. Per-test state isolation
     scenario.truncate_tables()
@@ -37,14 +33,14 @@ def test_sort_task_pipeline_full_crud_cycle(scenario):
     reader = KafkaProtoReader(
         broker_addr=scenario.kafka_broker,
         topic=SORT_MISTAKE_NODES_TOPIC,
-        group_id=f"pipeline-test-{uuid.uuid4().hex[:8]}",
+        group_id=f"producer-test-{uuid.uuid4().hex[:8]}",
     )
 
     try:
         system_id = "sg"
         hub_id = 101
-        node_name = "STATION_ALPHA"
-        updated_node_name = "STATION_ALPHA_UPDATED"
+        node_name = "PRODUCER_STATION_ALPHA"
+        updated_node_name = "PRODUCER_STATION_ALPHA_UPDATED"
 
         headers = {
             "Content-Type": "application/json",
@@ -53,7 +49,7 @@ def test_sort_task_pipeline_full_crud_cycle(scenario):
         }
 
         # =========================================================================
-        # STEP 1: CREATE SORT TASK
+        # STEP 1: CREATE NODE VIA API & ASSERT CONTRACT
         # =========================================================================
         create_payload = {
             "name": node_name,
@@ -63,9 +59,9 @@ def test_sort_task_pipeline_full_crud_cycle(scenario):
 
         with httpx.Client(timeout=15.0) as client:
             resp = client.post(url, json=create_payload, headers=headers)
-            assert resp.status_code in (200, 201), f"API call failed: {resp.text}"
+            assert resp.status_code in (200, 201), f"API create failed: {resp.text}"
 
-        received_event = reader.read_next_sort_node_event(timeout=15.0)
+        received_event = reader.read_next_proto(sort_node_pb2.SortNodeEvents, timeout=15.0)
 
         created_node_id = assert_node_created_contract(
             received_event,
@@ -74,30 +70,32 @@ def test_sort_task_pipeline_full_crud_cycle(scenario):
             name=node_name,
             node_type=sort_node_pb2.NodeType.NODE_TYPE_INTRA_MID,
         )
+        assert created_node_id > 0, "created node ID must be positive"
 
-        def check_downstream_sync():
-            record = query_intra_hub_node(scenario.db, "sort_service", created_node_id)
-            if not record or record.name != node_name:
-                return False
-            cached_proto = get_sort_service_intra_node(redis_sort, system_id, hub_id, created_node_id)
-            if not cached_proto or cached_proto.name != node_name:
-                return False
-            return True
+        # Assert producer's internal MySQL state
+        def check_created_in_db():
+            record = query_intra_hub_node(scenario.db, created_node_id)
+            return record is not None and record.name == node_name
 
         eventually(
-            check_downstream_sync,
-            timeout=15.0,
-            message="sort-service must consume create event and populate DB + Redis",
+            check_created_in_db,
+
+            timeout=10.0,
+
+            message="sort_mistake must persist created node in DB",
         )
 
-        # Helper to create an intra-hub node and ensure downstream sync
+        # =========================================================================
+        # HELPER FOR STEPS 2 & 3
+        # =========================================================================
         def create_node_via_api(name: str) -> int:
+            payload = {"name": name, "type": "NODE_TYPE_INTRA_MID"}
             with httpx.Client(timeout=15.0) as cl:
-                r = cl.post(url, json={"name": name, "type": "NODE_TYPE_INTRA_MID"}, headers=headers)
+                r = cl.post(url, json=payload, headers=headers)
                 assert r.status_code in (200, 201), f"API create failed: {r.text}"
 
-            evt = reader.read_next_sort_node_event(timeout=15.0)
-            allocated_id = assert_node_created_contract(
+            evt = reader.read_next_proto(sort_node_pb2.SortNodeEvents, timeout=15.0)
+            return assert_node_created_contract(
                 evt,
                 system_id=system_id,
                 hub_id=hub_id,
@@ -105,17 +103,10 @@ def test_sort_task_pipeline_full_crud_cycle(scenario):
                 node_type=sort_node_pb2.NodeType.NODE_TYPE_INTRA_MID,
             )
 
-            def check_sync():
-                record = query_intra_hub_node(scenario.db, "sort_service", allocated_id)
-                return record is not None and record.name == name
-
-            eventually(check_sync, timeout=15.0, message="sort-service must sync created node")
-            return allocated_id
-
         # =========================================================================
-        # STEP 2: UPDATE SORT TASK
+        # STEP 2: UPDATE NODE VIA API & ASSERT CONTRACT
         # =========================================================================
-        target_node_id = create_node_via_api("STATION_UPDATE_TARGET")
+        target_node_id = create_node_via_api("PRODUCER_UPDATE_TARGET")
         assert target_node_id > 0
 
         update_url = f"{sort_mistake_base_url}/1.0/intra/hubs/{hub_id}/nodes/{target_node_id}"
@@ -123,7 +114,7 @@ def test_sort_task_pipeline_full_crud_cycle(scenario):
             resp = client.patch(update_url, json={"name": updated_node_name}, headers=headers)
             assert resp.status_code in (200, 204), f"PATCH API call failed: {resp.text}"
 
-        received_update = reader.read_next_sort_node_event(timeout=15.0)
+        received_update = reader.read_next_proto(sort_node_pb2.SortNodeEvents, timeout=15.0)
         assert_node_updated_contract(
             received_update,
             system_id=system_id,
@@ -132,25 +123,22 @@ def test_sort_task_pipeline_full_crud_cycle(scenario):
             name=updated_node_name,
         )
 
-        def check_update_sync():
-            record = query_intra_hub_node(scenario.db, "sort_service", target_node_id)
-            if not record or record.name != updated_node_name:
-                return False
-            cached_proto = get_sort_service_intra_node(redis_sort, system_id, hub_id, target_node_id)
-            if not cached_proto or cached_proto.name != updated_node_name:
-                return False
-            return True
+        def check_updated_in_db():
+            record = query_intra_hub_node(scenario.db, target_node_id)
+            return record is not None and record.name == updated_node_name
 
         eventually(
-            check_update_sync,
-            timeout=15.0,
-            message="sort-service must consume update event and update DB + Redis",
+            check_updated_in_db,
+
+            timeout=10.0,
+
+            message="sort_mistake must update node in DB",
         )
 
         # =========================================================================
-        # STEP 3: DELETE SORT TASK
+        # STEP 3: DELETE NODE VIA API & ASSERT CONTRACT
         # =========================================================================
-        delete_target_id = create_node_via_api("STATION_DELETE_TARGET")
+        delete_target_id = create_node_via_api("PRODUCER_DELETE_TARGET")
         assert delete_target_id > 0
 
         delete_url = f"{sort_mistake_base_url}/1.0/intra/hubs/{hub_id}/nodes/{delete_target_id}"
@@ -158,7 +146,7 @@ def test_sort_task_pipeline_full_crud_cycle(scenario):
             resp = client.delete(delete_url, headers=headers)
             assert resp.status_code in (200, 204), f"DELETE API call failed: {resp.text}"
 
-        received_delete = reader.read_next_sort_node_event(timeout=15.0)
+        received_delete = reader.read_next_proto(sort_node_pb2.SortNodeEvents, timeout=15.0)
         assert_node_deleted_contract(
             received_delete,
             system_id=system_id,
@@ -166,22 +154,16 @@ def test_sort_task_pipeline_full_crud_cycle(scenario):
             node_id=delete_target_id,
         )
 
-        def check_delete_sync():
-            ss_record = query_intra_hub_node(scenario.db, "sort_service", delete_target_id)
-            if ss_record is not None:
-                return False
-            sm_record = query_intra_hub_node(scenario.db, "sort_mistake", delete_target_id)
-            if sm_record is not None:
-                return False
-            cached_proto = get_sort_service_intra_node(redis_sort, system_id, hub_id, delete_target_id)
-            if cached_proto is not None:
-                return False
-            return True
+        def check_deleted_in_db():
+            record = query_intra_hub_node(scenario.db, delete_target_id)
+            return record is None
 
         eventually(
-            check_delete_sync,
-            timeout=15.0,
-            message="sort-service and sort-mistake must evict deleted node from DB + Redis",
+            check_deleted_in_db,
+
+            timeout=10.0,
+
+            message="sort_mistake must delete node from DB",
         )
 
     finally:

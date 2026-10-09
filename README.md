@@ -1,104 +1,119 @@
-# Integration Suite (Python)
+# integration-py
 
-`integration-py` is a multi-repository integration-test harness for Ninja Van services. It builds local service images, starts real backing services on rootless Podman, and exercises HTTP, MySQL, Redis, Kafka, WireMock, and protobuf contracts through pytest.
+Multi-repo integration testing platform for Ninja Van logistics microservices using rootless Podman, declarative YAML scenarios, and session-shared backing infrastructure.
 
-The currently supported services are:
+The platform provides contract integration tests across:
 
 - `sort-mistake` — Go producer service.
 - `sort-service` — Scala/Play consumer service.
 
-The harness is deliberately integration-oriented: it does not replace MySQL, Kafka, Redis, or service-to-service HTTP with in-process mocks. WireMock is used only for external dependencies such as AAA/Core/Zones.
+Infrastructure services (MySQL 8.0, Apache Kafka 7.6.0, Redis 7, WireMock, and Flyway) are managed as session-scoped singletons through rootless Podman. Only application containers are spun up per scenario.
 
 ## Prerequisites
 
-Install and make available on your `PATH`:
+- **macOS** with a running Podman machine, or **Linux** with rootless Podman.
+- **Python 3.12+** (Python 3.13 tested).
+- **`uv`** (fast Python package and project manager).
+- **`just`** (command runner).
 
-- Python 3.12 or later and [uv](https://docs.astral.sh/uv/)
-- [just](https://github.com/casey/just)
-- Podman with a running rootless Podman machine/socket
-- Go (to build `sort-mistake`)
-- Java 11-compatible tooling and SBT (or `mise` configured for SBT) to build `sort-service`
-- Local checkouts of `sort-mistake`, `sort-service`, and the repository that owns the canonical sort-node protobuf definition
-
-On macOS, start Podman before running the suite:
+Verify that Podman is active:
 
 ```bash
-podman machine start
+podman machine start   # if on macOS
+podman info
 ```
 
-The default Podman binary is `/opt/podman/bin/podman`. Override it with `PODMAN_BIN` if needed.
+## Quick Start
 
-## Initial setup
+1. Create a local `.env` from the template:
 
-Create a local environment file, point it at your checkouts, then install dependencies and generate protobuf bindings:
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Point `.env` to your local service checkouts if you plan to build images locally:
+
+   ```ini
+   SORT_MISTAKE_DIR=/path/to/sort-mistake
+   SORT_SERVICE_DIR=/path/to/sort-service
+   ```
+
+3. Sync the virtualenv and compile Protobufs:
+
+   ```bash
+   just setup
+   ```
+
+4. Pre-pull the backing infrastructure images:
+
+   ```bash
+   just pull-images
+   ```
+
+5. Run the integration test suite:
+
+   ```bash
+   just test
+   ```
+
+## Repository Structure
+
+```text
+integration-py/
+├── config.yaml               # Centralized backing infrastructure image versions and Podman binary
+├── pyproject.toml            # Dependencies and pytest configuration
+├── justfile                  # Command runner recipes
+├── docker/                   # Containerfiles for local service builds
+├── proto/                    # Protobuf schemas and generated Python bindings
+│   └── protos_sort/
+│       └── sortmistake/
+│           ├── sort_node.proto
+│           └── sort_node_pb2.py
+├── src/harness/              # Core integration harness
+│   ├── config.py             # Config discovery and dynamic backing image loader
+│   ├── catalog/              # Microservice specifications (SortMistake, SortService)
+│   ├── infra/                # Backing infrastructure provisioners & utilities (MySQL, Redis, Kafka, WireMock)
+│   ├── env/                  # Runtime environments and EnvironmentBuilder
+│   ├── contract/             # Protobuf contract assertion library
+│   └── runner/               # Telemetry monitor CLI and ASCII reporters
+└── tests/                    # Service-centric integration scenarios
+    ├── conftest.py           # Shared session fixtures (shared_infra, scenario)
+    ├── common/               # Scenario harness orchestration, connectivity checks, and polling
+    ├── sort_mistake/
+    │   └── publish_sort_node/
+    │       ├── config.yaml
+    │       ├── test_publish_sort_node.py
+    │       └── util/
+    └── sort_service/
+        └── consume_sort_node/
+            ├── config.yaml
+            ├── test_consume_sort_node.py
+            └── util/
+```
+
+## Build local application images
+
+If you want to test code changes from your local checkouts rather than existing images:
 
 ```bash
-cp .env.example .env
-# Edit .env with absolute paths for your machine.
-
-just setup
-```
-
-`.env` is local-only and is loaded automatically. The important settings are:
-
-```dotenv
-SORT_MISTAKE_DIR=/absolute/path/to/sort-mistake
-SORT_SERVICE_DIR=/absolute/path/to/sort-service
-
-# Optional image tags; these are the defaults used by the tests after building.
-SORT_MISTAKE_IMAGE=sort-mistake:local
-SORT_SERVICE_IMAGE=sort-service:local
-
-# Exact canonical .proto file, not a copied/generated Python file.
-SORT_NODE_PROTO=/absolute/path/to/sort-protos/src/main/protobuf/sortmistake/sort_node.proto
-```
-
-You can pre-pull public infrastructure images before the first test run:
-
-```bash
-just pull-images
-```
-
-The image versions are configured in [`config.yaml`](config.yaml): MySQL 8, Confluent Local Kafka 7.6.0, Redis 7, WireMock 3.5, and Flyway 11.
-
-## Protobuf workflow
-
-Tests consume and assert real Kafka protobuf messages. The canonical schema must come from the source repository rather than being manually copied into this project.
-
-`just proto-gen` runs [`scripts/proto_gen.py`](scripts/proto_gen.py), which:
-
-1. Reads `SORT_NODE_PROTO` from `.env`.
-2. Locates the owning SBT project and derives a safe Python package name, such as `protos-sort` → `protos_sort`.
-3. Copies the `.proto` source into `proto/<package>/...` while retaining its protobuf-relative path.
-4. Runs `grpc_tools.protoc` to create the Python module and type stub beside it.
-
-The tests import the generated types from `proto/`, for example `proto.protos_sort.sortmistake.sort_node_pb2`. Re-run `just proto-gen` whenever the canonical schema changes.
-
-## Build local service images
-
-The test harness starts locally built application images. Build both images before running an affected suite:
-
-```bash
+# Build all local images
 just build-image
+
+# Build only one service
+just build-sort-mistake
+just build-sort-service
 ```
 
-Or build one service:
+Each recipe uses the local repository's native tooling:
 
-```bash
-just build-image sort-mistake
-just build-image sort-service
-```
-
-The build recipes use the directories and tags in `.env`:
-
-- `sort-mistake`: runs `go mod vendor`, then builds the Go service with [`docker/sort-mistake.Containerfile`](docker/sort-mistake.Containerfile).
+- `sort-mistake`: runs `go mod vendor`, then builds with [`docker/sort-mistake.Containerfile`](docker/sort-mistake.Containerfile).
 - `sort-service`: runs `sbt stage` (using `mise` when available), then packages the staged Play application with [`docker/sort-service.Containerfile`](docker/sort-service.Containerfile).
 
 You may override image tags or directories temporarily without editing `.env`:
 
 ```bash
 SORT_MISTAKE_IMAGE=sort-mistake:my-branch just build-image sort-mistake
-SORT_MISTAKE_IMAGE=sort-mistake:my-branch just test-producer
+SORT_MISTAKE_IMAGE=sort-mistake:my-branch just test-sort-mistake
 ```
 
 ## Run tests
@@ -110,19 +125,16 @@ Use the `just` recipes for normal runs. They wrap pytest in `test-runner`, which
 just test
 
 # Service-isolated suites
+just test-sort-mistake
+just test-sort-service
+
+# Suite aliases for producer and consumer
 just test-producer
 just test-consumer
 
-# Both services in one workflow
-just test-e2e
-just test-intra-node
-
 # A specific target or a selected test name
-just test tests/producer/intra_node
-just test tests producer
-
-# Unit tests do not require application or infrastructure containers
-uv run pytest tests/unit
+just test tests/sort_mistake/publish_sort_node
+just test tests sort_mistake
 
 # Write JUnit XML to reports/junit.xml
 just test-report tests
@@ -131,7 +143,7 @@ just test-report tests
 For direct pytest use, this is also valid:
 
 ```bash
-uv run pytest tests/producer/intra_node
+uv run pytest tests/sort_mistake/publish_sort_node
 ```
 
 Direct pytest still uses session-shared infrastructure. It simply does not print the `test-runner` resource report.
@@ -143,30 +155,34 @@ Each test directory with a `config.yaml` describes a scenario: needed databases,
 At collection time, the session fixture takes the union of the selected scenario configurations and creates one shared bridge network named `integration-shared-net`. It starts only the requested backing services, then runs Flyway migrations once per database schema.
 
 ```text
-pytest session
-  └─ shared infrastructure starts once
-       ├─ MySQL (one server; one or more logical databases)
-       ├─ Redis (one server; multiple DNS aliases)
-       ├─ Confluent Local Kafka (one broker; declared topics)
-       └─ WireMock (AAA default stub)
+pytest session start
+  ├─ inspect all selected tests/**/config.yaml
+  ├─ start integration-shared-net
+  ├─ start singleton MySQL, Redis, Kafka, WireMock
+  └─ run Flyway migrations once for each database
 
-each test scenario
-  ├─ reset shared state
-  ├─ start only that scenario's application containers
-  ├─ run connectivity subtests and the test body
-  └─ remove application containers
+scenario 1 (e.g. tests/sort_mistake/publish_sort_node)
+  ├─ reset: truncate tables, flush redis, delete & recreate kafka topics, reset wiremock
+  ├─ start sort-mistake container on integration-shared-net
+  ├─ wait for health checks
+  ├─ run test cases
+  └─ stop and remove sort-mistake container
 
-pytest session end
-  └─ remove shared containers and network
+scenario 2 (e.g. tests/sort_service/consume_sort_node)
+  ├─ reset: truncate tables, flush redis, delete & recreate kafka topics, reset wiremock
+  ├─ start sort-service container on integration-shared-net
+  ├─ wait for health checks
+  ├─ run test cases
+  └─ stop and remove sort-service container
+
+pytest session finish
+  └─ stop and remove all backing infrastructure containers and network
 ```
 
-The shared model keeps expensive services alive for the session while preserving scenario isolation:
-
-- **MySQL**: one MySQL server hosts `sort_mistake` and/or `sort_service`. Before a scenario, all base tables in configured schemas are truncated with foreign-key checks temporarily disabled.
-- **Flyway**: ephemeral Flyway containers apply migrations during session startup only. They do not run again per scenario.
-- **Redis**: one Redis container is reachable as both `redis-sort-mistake` and `redis-sort` when both are required. It is flushed before each scenario.
+- **MySQL**: all databases are created in one MySQL 8.0 instance. Between scenarios, base tables in each database are truncated while preserving schema definitions.
+- **Redis**: physical Redis 7 instances are reused. Between scenarios, each instance is flushed (`FLUSHALL`).
 - **Kafka**: one `confluentinc/confluent-local:7.6.0` container hosts all declared topics. Before a scenario, test topics are deleted and recreated so messages and offsets cannot leak to the next scenario. Test consumers also use unique group IDs.
-- **WireMock**: one container is reachable as `mock-services`. Its mappings and request journal are reset before each scenario, then the default AAA response stub is restored.
+- **WireMock**: one WireMock 3.5 container handles authentication and HTTP stubs. Between scenarios, WireMock mappings and request logs are reset.
 - **Application services**: `sort-mistake` and `sort-service` are intentionally per-scenario. This prevents in-memory state, worker threads, and consumers from one contract test affecting another.
 
 The shared resources make scenarios sequential by design. Do not run these integration suites with `pytest-xdist` (`-n ...`); the harness rejects xdist workers because concurrent state resets would be unsafe.
@@ -175,9 +191,8 @@ The shared resources make scenarios sequential by design. Do not run these integ
 
 | Suite | Application containers | MySQL schemas | Kafka topics | Redis alias(es) | WireMock |
 | --- | --- | --- | --- | --- | --- |
-| `tests/producer/intra_node` | `sort-mistake` | `sort_mistake` | `dev-sort-mistake-evt-nodes` | `redis-sort-mistake` | Yes |
-| `tests/consumer/intra_node` | `sort-service` | `sort_service` | `dev-sort-mistake-evt-nodes`, `hub-events-dev-proto-topic`, `dev-hub-evt-shipment-failed-parcel-update` | `redis-sort` | Yes |
-| `tests/e2e/intra_node` | `sort-mistake`, `sort-service` | `sort_mistake`, `sort_service` | all three above | `redis-sort-mistake`, `redis-sort` | Yes |
+| `tests/sort_mistake/publish_sort_node` | `sort-mistake` | `sort_mistake` | `dev-sort-mistake-evt-nodes` | `redis-sort-mistake` | Yes |
+| `tests/sort_service/consume_sort_node` | `sort-service` | `sort_service` | `dev-sort-mistake-evt-nodes`, `hub-events-dev-proto-topic`, `dev-hub-evt-shipment-failed-parcel-update` | `redis-sort` | Yes |
 
 When all suites are selected, the session starts one container each for MySQL, Redis, Kafka, and WireMock, plus an ephemeral Flyway migration container for each migrated schema.
 
@@ -198,11 +213,11 @@ Treat a scenario as a directory containing test modules and one adjacent `config
 
 ### Add coverage for an existing service
 
-For another workflow of `sort-mistake` or `sort-service`, create a directory such as `tests/producer/my_workflow/`, add a `config.yaml`, and write tests that request the `scenario` fixture.
+For another workflow of `sort-mistake` or `sort-service`, create a directory such as `tests/sort_mistake/my_workflow/`, add a `config.yaml`, and write tests that request the `scenario` fixture.
 
 ```yaml
-# tests/producer/my_workflow/config.yaml
-name: producer/my_workflow
+# tests/sort_mistake/my_workflow/config.yaml
+name: sort_mistake/my_workflow
 wiremock: true
 
 mysql:
@@ -222,12 +237,9 @@ services:
   - name: sort-mistake
     endpoint_key: sort-mistake
     expose_port: "9000/tcp"
-    env_overrides:
-      NV_KAFKA_PRODUCER_ENABLE: "true"
 ```
 
-Declare every dependency that the test or started application actually uses. The session fixture merges the requirements of all selected scenario files. A test can use the scenario helpers below rather than hard-coding host ports:
-
+In the test file:
 ```python
 def test_example(scenario):
     base_url = scenario.endpoint("sort-mistake")
@@ -235,12 +247,10 @@ def test_example(scenario):
     kafka_bootstrap = scenario.kafka_broker
     wiremock_url = scenario.wiremock_url
 
-    # Explicit cleanup is useful within a multi-step test too.
+    # Automatic cleanup defaults to scenario's mysql.check_tables
     scenario.truncate_tables()
     scenario.flush_redis()
 ```
-
-`check_tables` is a connectivity/schema assertion. It is not the list that controls session cleanup: the shared environment discovers and truncates every base table in each declared MySQL schema.
 
 ### Add a new local application repository
 
@@ -253,56 +263,19 @@ Adding a new application means teaching the catalog how to build, start, and rea
 5. Create an adjacent scenario `config.yaml` declaring the databases, topics, Redis aliases, WireMock use, and the new service. Add tests that use `scenario.endpoint("inventory-service")`.
 6. Build the image, run that suite directly, then run it with `just test ...` to verify its resource report.
 
-Start with a conservative service definition: map a host port only when a test must make a host-to-container request, and make readiness use a real health endpoint when the application provides one.
+## Telemetry and Resource Monitoring
 
-### Add MySQL schemas, migrations, topics, or aliases
+The platform includes a built-in telemetry CLI (`test-runner`) that monitors host resources and container stats via the Podman socket during test runs:
 
-The current scenario schema supports MySQL, Kafka, Redis, and WireMock. Add a new dependency to the scenario file; the shared session will union it with all other selected suites.
+- **Host RSS / Peak Memory**: uses `getrusage(RUSAGE_CHILDREN)`.
+- **Container Resource Metrics**: samples CPU %, memory usage, PIDs, network I/O, and block I/O every 600ms via `podman stats --no-stream --format json`.
+- **Storage Deltas**: captures container layer storage deltas via `podman system df --format json` before and after test execution.
 
-```yaml
-mysql:
-  databases:
-    - inventory_service
-  migrations:
-    - database: inventory_service
-      migration_dir: ../inventory-service/resources/db/migration
-  check_tables:
-    - inventory_service.stock_items
+To run tests with resource reporting:
 
-kafka:
-  topics:
-    - inventory-events-dev
-
-redis_instances:
-  - redis-inventory
+```bash
+just test
 ```
-
-Use an explicit `migrations` entry for a new service unless its local repository follows the existing convention: a repository named from the database (for example `inventory-service` for `inventory_service`) with migrations at `resources/db/migration`. Explicit paths make the dependency unambiguous.
-
-For Redis, each listed alias resolves to the same shared Redis server. Use a distinct alias when it makes a service’s configuration clearer; it does not create another Redis container in the shared model.
-
-### Add another shared infrastructure type
-
-MySQL, Redis, Kafka, and WireMock are shared infrastructure today. A new shared service—PostgreSQL, OpenSearch, MinIO, a schema registry, and so on—needs more than a container start call: it must have a reproducible reset strategy between scenarios.
-
-Make these coordinated changes:
-
-1. Extend `ScenarioConfig` in `tests/common/schema.py` with a validated configuration section for the new dependency.
-2. Extend `EnvironmentBuilder` to start it on `integration-shared-net`, assign required aliases, wait for readiness, and label the container with `default_labels(...)`.
-3. Store its container, host endpoint, and client in `TestEnvironment`; close/remove them in `TestEnvironment.teardown()`.
-4. Update `SharedTestEnvironment.start()` to merge the dependency configuration across selected scenarios and start exactly one instance.
-5. Add a `reset_<dependency>()` method and call it from `prepare_scenario()`. The reset must clear records, queues, buckets, indices, mappings, or stubs that could leak across scenarios.
-6. Extend `tests/common/connectivity.py` with an inexpensive health/connectivity subtest, then add focused unit tests for configuration merging and reset behavior.
-
-If reliable reset is impossible or too expensive, keep that component application- or scenario-scoped instead. Shared infrastructure is appropriate only when a clean state can be established without restarting every backing service.
-
-All harness-created containers must use `default_labels(...)`. That supplies `harness.managed=true` for cleanup and, under `test-runner`, the per-run `harness.run_id` used by resource reports. Omitting the helper makes cleanup and resource attribution inaccurate.
-
-## Resource reports
-
-`just test ...` invokes `test-runner`. Each invocation creates a unique `HARNESS_RUN_ID`, which is applied as the `harness.run_id` label to every harness-created container and network. The resource monitor samples Podman but aggregates only containers with that exact label.
-
-This means the report excludes unrelated local workloads, such as another repository's Kafka, Kafka UI, or database containers. The report includes memory, CPU, PIDs, network I/O, block I/O, and storage/workspace deltas for the current run's containers.
 
 ## Troubleshooting and cleanup
 
@@ -319,5 +292,3 @@ To remove dangling build images and reports as well:
 ```bash
 just clean
 ```
-
-`just clean` does not remove your source repositories, named external volumes, or unrelated Podman workloads.

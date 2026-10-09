@@ -1,4 +1,4 @@
-"""WireMock authentication mock configuration."""
+"""WireMock authentication mock configuration utilities."""
 
 from __future__ import annotations
 
@@ -77,7 +77,7 @@ def setup_wiremock_aaa(wiremock_base_url: str, timeout: float = 30.0) -> None:
                     resp = client.post(mappings_url, json=stub)
                     resp.raise_for_status()
                     return
-        except Exception:
+        except (httpx.HTTPError, OSError):
             time.sleep(0.5)
 
     raise TimeoutError(f"Timed out configuring WireMock at {base} after {timeout}s")
