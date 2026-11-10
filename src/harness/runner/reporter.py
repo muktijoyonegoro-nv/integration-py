@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import sys
-from dataclasses import dataclass
-from typing import Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import Any
 
 from harness.runner.monitor import (
-    ContainerInfo,
     ContainerMetrics,
     format_bytes,
     format_duration,
@@ -27,6 +25,7 @@ class ReportData:
     storage_delta_podman: int
     workspace_delta: int
     disk_free_delta: int
+    test_results: list[dict[str, Any]] = field(default_factory=list)
 
 
 def print_report(d: ReportData) -> None:
@@ -41,6 +40,16 @@ def print_report(d: ReportData) -> None:
     print(f"  Status:            {d.status}")
     print(f"  Duration:          {format_duration(d.duration_seconds)}")
     print(f"  Command:           {d.command}")
+
+    print(dash)
+    print("  TEST RESULTS")
+    if not d.test_results:
+        print("    No pytest test results were recorded.")
+    else:
+        for test in d.test_results:
+            print(f"[{test['status']}] {test['name']}")
+            for checkpoint in test.get("checkpoints", []):
+                print(f"  - [{checkpoint['status']}] {checkpoint['message']}")
 
     # Section 1: Host Process Tree
     print(dash)
@@ -72,13 +81,13 @@ def print_report(d: ReportData) -> None:
             block_w = d.container_metrics.latest_block_write
             peak_pids = d.container_metrics.peak_concurrent_pids
 
-            short_name_counts: Dict[str, int] = {}
+            short_name_counts: dict[str, int] = {}
             for info in d.container_metrics.containers.values():
                 short_name_counts[info.short_name] = short_name_counts.get(info.short_name, 0) + 1
 
             items = []
             distinct_names = []
-            name_idx_tracker: Dict[str, int] = {}
+            name_idx_tracker: dict[str, int] = {}
 
             for cid, info in d.container_metrics.containers.items():
                 display_name = info.short_name

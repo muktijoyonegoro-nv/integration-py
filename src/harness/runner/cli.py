@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import json
 import os
 import resource
 import signal
@@ -21,6 +23,16 @@ from harness.runner.monitor import (
     poll_podman_stats,
 )
 from harness.runner.reporter import ReportData, print_report
+
+
+def load_test_results(report_path: str) -> list[dict]:
+    """Reads checkpoint results emitted by the pytest child process."""
+    try:
+        with open(report_path, encoding="utf-8") as report_file:
+            payload = json.load(report_file)
+        return payload.get("tests", [])
+    except (OSError, ValueError, TypeError):
+        return []
 
 
 def run_test_runner(args: list[str]) -> int:
@@ -43,6 +55,9 @@ def run_test_runner(args: list[str]) -> int:
     init_disk_free = get_disk_free(".")
 
     run_id = uuid.uuid4().hex
+    checkpoint_report_path = f"/private/tmp/integration-py-checkpoints-{run_id}.json"
+    with contextlib.suppress(FileNotFoundError):
+        os.unlink(checkpoint_report_path)
     metrics = ContainerMetrics(run_id=run_id)
     stop_event = threading.Event()
 
@@ -76,6 +91,7 @@ def run_test_runner(args: list[str]) -> int:
     try:
         child_env = os.environ.copy()
         child_env["HARNESS_RUN_ID"] = run_id
+        child_env["HARNESS_CHECKPOINT_REPORT_PATH"] = checkpoint_report_path
         proc = subprocess.Popen([target_cmd] + target_args, env=child_env)
         proc.wait()
         exit_code = proc.returncode
@@ -117,7 +133,11 @@ def run_test_runner(args: list[str]) -> int:
         storage_delta_podman=final_podman_storage - init_podman_storage,
         workspace_delta=final_workspace_size - init_workspace_size,
         disk_free_delta=final_disk_free - init_disk_free,
+        test_results=load_test_results(checkpoint_report_path),
     )
+
+    with contextlib.suppress(FileNotFoundError):
+        os.unlink(checkpoint_report_path)
 
     print_report(report)
     return exit_code

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator
 
 import pytest
 
 from harness.env.shared import SharedTestEnvironment
+from harness.reporting.checkpoints import begin_test, end_test, set_test_status, write_report
 from tests.common.harness import Scenario, setup_scenario
 
 
@@ -17,6 +18,23 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo) -> Gener
     outcome = yield
     rep = outcome.get_result()
     setattr(item, f"rep_{rep.when}", rep)
+    if rep.when == "call":
+        set_test_status(item.nodeid, passed=rep.passed)
+    elif rep.when in {"setup", "teardown"} and rep.failed:
+        set_test_status(item.nodeid, passed=False)
+
+
+@pytest.fixture(autouse=True)
+def checkpoint_test_context(request: pytest.FixtureRequest) -> Generator[None, None, None]:
+    """Associates eventual-consistency checkpoints with the executing test."""
+    token = begin_test(request.node.nodeid, request.node.name)
+    yield
+    end_test(token)
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """Persist test/checkpoint results for the outer test-runner process."""
+    write_report()
 
 
 @pytest.fixture(scope="session")

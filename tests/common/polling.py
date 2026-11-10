@@ -5,6 +5,8 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 
+from harness.reporting.checkpoints import record_checkpoint
+
 
 def eventually[T](
     predicate_fn: Callable[[], T],
@@ -21,6 +23,7 @@ def eventually[T](
         try:
             val = predicate_fn()
             if val:
+                record_checkpoint(message, passed=True)
                 return val
             last_val = val
         except Exception as e:  # noqa: BLE001
@@ -30,4 +33,5 @@ def eventually[T](
     detail = f"; last returned: {last_val!r}" if last_val is not None else ""
     if last_err:
         detail += f"; last exception: {last_err}"
+    record_checkpoint(message, passed=False)
     raise AssertionError(f"{message} (waited {timeout}s){detail}")
