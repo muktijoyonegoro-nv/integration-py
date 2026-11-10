@@ -12,8 +12,10 @@ export TESTCONTAINERS_RYUK_DISABLED := "true"
 # Local repository paths & container image tags
 SORT_MISTAKE_DIR := env_var_or_default("SORT_MISTAKE_DIR", "../sort-mistake")
 SORT_SERVICE_DIR := env_var_or_default("SORT_SERVICE_DIR", "../sort-service")
+AV_BE_DIR := env_var_or_default("AV_BE_DIR", "../av-be")
 SORT_MISTAKE_IMAGE := env_var_or_default("SORT_MISTAKE_IMAGE", "sort-mistake:latest")
 SORT_SERVICE_IMAGE := env_var_or_default("SORT_SERVICE_IMAGE", "sort-service:latest")
+AV_BE_IMAGE := env_var_or_default("AV_BE_IMAGE", "av-be:latest")
 
 # Default recipe: display help
 default:
@@ -58,17 +60,35 @@ build-sort-service:
     {{PODMAN_BIN}} image prune -f >/dev/null 2>&1 || true
     echo "{{SORT_SERVICE_IMAGE}} successfully built."
 
-# Build local application images (overridable: service=all, sort-mistake, or sort-service)
+# Build av-be local image
+build-av-be:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -d "{{AV_BE_DIR}}" ]; then
+        echo "ERROR: Directory '{{AV_BE_DIR}}' not found."
+        echo "Please point AV_BE_DIR in .env to your local av-be checkout."
+        exit 1
+    fi
+    echo "Building {{AV_BE_IMAGE}} from {{AV_BE_DIR}}..."
+    (cd "{{AV_BE_DIR}}" && (command -v mise >/dev/null 2>&1 && mise exec -- sbt stage || sbt stage))
+    {{PODMAN_BIN}} build --force-rm -t {{AV_BE_IMAGE}} -f docker/av-be.Containerfile {{AV_BE_DIR}}
+    {{PODMAN_BIN}} image prune -f >/dev/null 2>&1 || true
+    echo "{{AV_BE_IMAGE}} successfully built."
+
+# Build local application images (overridable: service=all, sort-mistake, sort-service, or av-be)
 build-image service="all":
     #!/usr/bin/env bash
     if [ "{{service}}" = "all" ]; then
         just build-sort-mistake
         just build-sort-service
+        just build-av-be
         echo "All local application images built successfully."
     elif [ "{{service}}" = "sort-mistake" ]; then
         just build-sort-mistake
     elif [ "{{service}}" = "sort-service" ]; then
         just build-sort-service
+    elif [ "{{service}}" = "av-be" ]; then
+        just build-av-be
     else
         echo "Unknown service: {{service}}"
         exit 1
@@ -89,6 +109,9 @@ test-sort-mistake timeout="5m":
 # Sort-service scenario shortcut
 test-sort-service timeout="5m":
     just test "tests/sort_service" "" {{timeout}}
+
+test-av-be timeout="5m":
+    just test "tests/av_be" "" {{timeout}}
 
 # Aliases for producer and consumer suites
 test-producer timeout="5m":

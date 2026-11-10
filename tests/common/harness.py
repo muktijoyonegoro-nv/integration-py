@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from harness.catalog import SortMistake, SortService
+from harness.catalog import AvBe, SortMistake, SortService
 from harness.catalog.service import AppContainer, ServiceDefinition, start_service
 from harness.env.builder import DatabaseMigration, EnvironmentBuilder
 from harness.env.environment import TestEnvironment
@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 SERVICE_CATALOG: Dict[str, ServiceDefinition] = {
     "sort-mistake": SortMistake,
     "sort-service": SortService,
+    "av-be": AvBe,
 }
 
 

@@ -9,9 +9,13 @@ from pathlib import Path
 
 # Mapping of environment variable names to their compilation configuration
 # Format: env_var: (fallback_relative_path, description)
-PROTO_ENV_VARS = [
-    "SORT_NODE_PROTO",
+PROTO_ENV_VARS = ["SORT_NODE_PROTO"]
+ADDRESSING_PROTO_ENV_VARS = [
+    "ADDRESSING_ZONE_EVENT_PROTO",
+    "ADDRESSING_ZONE_V4_PROTO",
+    "ADDRESSING_FIRST_MILE_ZONE_EVENT_PROTO",
 ]
+ADDRESSING_EXTERNAL_PROTO_ROOT_ENV = "ADDRESSING_PROTO_EXTERNAL_ROOT"
 
 
 def find_sbt_project_name(proto_file: Path) -> str:
@@ -46,6 +50,51 @@ def extract_protobuf_relative_path(proto_file: Path) -> Path:
 def sanitize_package_name(name: str) -> str:
     """Sanitizes project name to valid Python package identifier (e.g. protos-sort -> protos_sort)."""
     return re.sub(r"[^a-zA-Z0-9_]", "_", name)
+
+
+def protobuf_source_root(proto_file: Path) -> Path:
+    """Returns the enclosing ``src/main/protobuf`` directory for a schema."""
+    parts = list(proto_file.parts)
+    for i in range(len(parts) - 3):
+        if parts[i : i + 3] == ["src", "main", "protobuf"]:
+            return Path(*parts[: i + 3])
+    raise ValueError(f"Could not find src/main/protobuf for {proto_file}")
+
+
+def imported_proto_paths(proto_file: Path) -> list[str]:
+    return re.findall(r'^\s*import\s+"([^"]+)"\s*;', proto_file.read_text(encoding="utf-8"), re.MULTILINE)
+
+
+def sync_proto_closure(
+    entry: Path,
+    source_roots: list[Path],
+    destination_root: Path,
+    proto_root: Path,
+) -> None:
+    """Copies one schema and only the non-Google schemas it transitively imports."""
+    visited: set[str] = set()
+
+    def copy_import(import_path: str, source: Path) -> None:
+        if import_path.startswith("google/"):
+            return
+        if import_path in visited:
+            return
+        visited.add(import_path)
+        for source_root in source_roots:
+            candidate = source_root / import_path
+            if candidate.is_file():
+                destination = destination_root / import_path
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(candidate, destination)
+                ensure_init_py(destination.parent, proto_root)
+                for nested_import in imported_proto_paths(candidate):
+                    copy_import(nested_import, candidate)
+                return
+        raise FileNotFoundError(f"Unable to resolve import {import_path!r} used by {source}")
+
+    entry_root = next(root for root in source_roots if entry.is_relative_to(root))
+    entry_import_path = str(entry.relative_to(entry_root))
+    copy_import(entry_import_path, entry)
 
 
 def ensure_init_py(directory: Path, stop_at: Path) -> None:
@@ -96,9 +145,38 @@ def sync_and_generate() -> None:
         shutil.copy2(proto_file, dest_file)
         synced_targets.append((dest_file, proto_root / sanitized_project))
 
+    addressing_entries: list[tuple[str, Path]] = []
+    for env_var in ADDRESSING_PROTO_ENV_VARS:
+        proto_file = Path(os.environ.get(env_var, "").strip()).expanduser().resolve()
+        if not proto_file.is_file():
+            print(f"ERROR: Environment variable {env_var} must point to a protobuf schema", file=sys.stderr)
+            sys.exit(1)
+        addressing_entries.append((env_var, proto_file))
+
+    external_root = Path(os.environ.get(ADDRESSING_EXTERNAL_PROTO_ROOT_ENV, "").strip()).expanduser().resolve()
+    if not external_root.is_dir():
+        print(f"ERROR: {ADDRESSING_EXTERNAL_PROTO_ROOT_ENV} must point to external protobuf dependencies", file=sys.stderr)
+        sys.exit(1)
+
+    addressing_project = proto_root / "protos_addressing"
+    if addressing_project.exists():
+        shutil.rmtree(addressing_project)
+    source_roots = [protobuf_source_root(entry) for _, entry in addressing_entries] + [external_root]
+    for env_var, entry in addressing_entries:
+        print(f"Syncing {env_var}:\n  Source:      {entry}\n  Destination: {addressing_project}")
+        sync_proto_closure(entry, source_roots, addressing_project, proto_root)
+    synced_targets.extend((proto, addressing_project) for proto in addressing_project.rglob("*.proto"))
+
     # Compile synced proto files using grpc_tools.protoc
-    for dest_file, project_root in synced_targets:
-        print(f"Compiling protobuf: {dest_file.relative_to(root_dir)}...")
+    compiled_projects: set[Path] = set()
+    for _, project_root in synced_targets:
+        if project_root in compiled_projects:
+            continue
+        compiled_projects.add(project_root)
+        proto_files = sorted(project_root.rglob("*.proto"))
+        if not proto_files:
+            continue
+        print(f"Compiling protobuf project: {project_root.relative_to(root_dir)}...")
         cmd = [
             sys.executable,
             "-m",
@@ -106,11 +184,11 @@ def sync_and_generate() -> None:
             f"--proto_path={project_root}",
             f"--python_out={project_root}",
             f"--pyi_out={project_root}",
-            str(dest_file),
+            *(str(proto) for proto in proto_files),
         ]
-        res = subprocess.run(cmd, capture_output=True, text=True)
+        res = subprocess.run(cmd, capture_output=True, text=True, check=False)
         if res.returncode != 0:
-            print(f"protoc compilation failed for {dest_file}:\n{res.stderr}", file=sys.stderr)
+            print(f"protoc compilation failed for {project_root}:\n{res.stderr}", file=sys.stderr)
             sys.exit(res.returncode)
 
     print("All protobuf definitions synced and compiled successfully!")

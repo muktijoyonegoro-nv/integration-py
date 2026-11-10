@@ -1,0 +1,34 @@
+name: av_be/consume_fm_zone_events
+network_name: av-be-consume-fm-zone-events-net
+startup_timeout: 300.0
+wiremock: true
+
+# AV requires a live JDBC endpoint during eager application bootstrap. Zone
+# consumer tests neither migrate nor read/write this database.
+mysql:
+  databases:
+    - av
+
+kafka:
+  topics:
+    - it-av-lm-zones
+    - it-av-fm-zones
+    - it-av-order-events
+    - it-av-order-create
+    - it-av-verification-response
+    - it-av-addresses
+    - it-av-maxwell
+    - it-av-verification
+    - it-av-verification-request
+
+redis_instances:
+  - redis-av
+
+services:
+  - name: av-be
+    endpoint_key: av-be
+    expose_port: "9000/tcp"
+    dump_logs_on_failure: true
+    env_overrides:
+      NV_KAFKA_GROUP_ID: integration-av-fm-zone-consumer
+      NV_KAFKA_STREAMS_APPLICATION_ID_CONFIG: integration-av-fm-zone

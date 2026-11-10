@@ -54,6 +54,7 @@ timeout = 900
 markers = [
     "sort_mistake: Contract tests for sort-mistake service",
     "sort_service: Contract tests for sort-service service",
+    "av_be: Contract tests for av-be service",
     "producer: Producer-isolated contract tests",
     "consumer: Consumer-isolated contract tests",
 ]

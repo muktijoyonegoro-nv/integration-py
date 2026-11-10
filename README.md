@@ -6,6 +6,7 @@ The platform provides contract integration tests across:
 
 - `sort-mistake` — Go producer service.
 - `sort-service` — Scala/Play consumer service.
+- `av-be` — Java/Play consumer service; zone events are cached in Redis.
 
 Infrastructure services (MySQL 8.0, Apache Kafka 7.6.0, Redis 7, WireMock, and Flyway) are managed as session-scoped singletons through rootless Podman. Only application containers are spun up per scenario.
 
@@ -36,6 +37,7 @@ podman info
    ```ini
    SORT_MISTAKE_DIR=/path/to/sort-mistake
    SORT_SERVICE_DIR=/path/to/sort-service
+AV_BE_DIR=/path/to/av-be
    ```
 
 3. Sync the virtualenv and compile Protobufs:
@@ -89,6 +91,9 @@ integration-py/
             ├── config.yaml
             ├── test_consume_sort_node.py
             └── util/
+    └── av_be/
+        ├── consume_fm_zone_events/
+        └── consume_lm_zone_events/
 ```
 
 ## Build local application images
@@ -102,12 +107,14 @@ just build-image
 # Build only one service
 just build-sort-mistake
 just build-sort-service
+just build-av-be
 ```
 
 Each recipe uses the local repository's native tooling:
 
 - `sort-mistake`: runs `go mod vendor`, then builds with [`docker/sort-mistake.Containerfile`](docker/sort-mistake.Containerfile).
 - `sort-service`: runs `sbt stage` (using `mise` when available), then packages the staged Play application with [`docker/sort-service.Containerfile`](docker/sort-service.Containerfile).
+- `av-be`: runs `sbt stage` (using `mise` when available), then packages the staged Play application with [`docker/av-be.Containerfile`](docker/av-be.Containerfile).
 
 You may override image tags or directories temporarily without editing `.env`:
 
@@ -127,6 +134,7 @@ just test
 # Service-isolated suites
 just test-sort-mistake
 just test-sort-service
+just test-av-be
 
 # Suite aliases for producer and consumer
 just test-producer
