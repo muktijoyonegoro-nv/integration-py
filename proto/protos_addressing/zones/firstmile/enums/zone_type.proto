@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package protos.addressing.zones.firstmile.enums;
+
+option java_package = "co.ninjavan.protos.addressing.zones.firstmile.enums";
+option java_outer_classname = "ZoneTypeProto";
+option go_package = "bitbucket.ninjavan.co/ad/addressing-protos/go/zones/firstmile/enums";
+
+enum ZoneType {
+    DEFAULT_ZONE_TYPE    = 0;
+    STANDARD             = 1;
+    RTS                  = 2;
+}
+

@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package proto.model.zone;
+
+option java_package = "co.ninjavan.protos.addressing.zone";
+option java_outer_classname = "ZoneEventProto";
+option go_package = "bitbucket.ninjavan.co/ad/addressing-protos/go/zone";
+
+import "zone/geobuf.proto";
+
+enum ZoneType {
+    ZONE_TYPE_UNSPECIFIED = 0;
+    ZONE_TYPE_STANDARD = 1;
+    ZONE_TYPE_RTS = 2;
+}
+
+enum SystemId {
+    SYSTEM_ID_UNSPECIFIED = 0;
+    SYSTEM_ID_SG = 1;
+    SYSTEM_ID_MY = 2;
+    SYSTEM_ID_ID = 3;
+    SYSTEM_ID_TH = 4;
+    SYSTEM_ID_PH = 5;
+    SYSTEM_ID_VN = 6;
+    SYSTEM_ID_MM = 7;
+    SYSTEM_ID_MA = 8;
+}
+
+enum Event {
+    EVENT_UNSPECIFIED = 0;
+    EVENT_CREATE = 1;
+    EVENT_UPDATE = 2;
+    EVENT_DELETE = 3;
+    EVENT_REFRESH = 5;
+}
+
+enum Source {
+    SOURCE_UNSPECIFIED = 0;
+    SOURCE_ADDRESSING = 1;
+    SOURCE_ZONES = 2;
+}
+
+message ZoneEvent {
+    Event event = 1;
+    int64 id = 2;
+    int64 legacy_zone_id = 3;
+    SystemId system_id = 4;
+    string name = 5;
+    ZoneType type = 6;
+    int64 hub_id = 7;
+    string short_name = 8;
+    string description = 9;
+    double latitude = 10;
+    double longitude = 11;
+    Data polygon = 12;
+    Source source = 13;
+    optional string tag_name = 14;
+    repeated int64 shipper_ids = 15;
+}

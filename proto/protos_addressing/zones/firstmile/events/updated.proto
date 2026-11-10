@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package protos.addressing.zones.firstmile.events;
+
+option java_package = "co.ninjavan.protos.addressing.zones.firstmile.events";
+option java_outer_classname = "UpdatedProto";
+option go_package = "bitbucket.ninjavan.co/ad/addressing-protos/go/zones/firstmile/events";
+
+import "common/update_common.proto";
+
+message UpdateNullableString {
+    optional string oldValue = 1;
+    optional string newValue = 2;
+}
+
+message UpdateLongList {
+    repeated int64 oldValue = 1;
+    repeated int64 newValue = 2;
+}
+
+message Updated {
+    repeated Field      updates       = 1;
+
+    message Field {
+        oneof field {
+            commons.common.UpdateLong     hub_id            = 1;
+            commons.common.UpdateString   name              = 2;
+            commons.common.UpdateString   short_name        = 3;
+            commons.common.UpdateString   description       = 4;
+            commons.common.UpdateDouble   latitude          = 5;
+            commons.common.UpdateDouble   longitude         = 6;
+            commons.common.UpdateString   polygon           = 7;
+            UpdateNullableString           tag_name          = 8;
+            UpdateLongList                 shipper_ids       = 9;
+        }
+    }
+}
+

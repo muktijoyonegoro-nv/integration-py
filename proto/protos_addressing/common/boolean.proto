@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package protos.commons.common;
+
+option java_package = "co.ninjavan.protos.commons";
+option go_package = "bitbucket.ninjavan.co/protos/proto-commons/go/common";
+option java_outer_classname = "BooleanProto";
+
+enum Boolean {
+    DEFAULT_BOOLEAN_VALUE = 0;
+    FALSE                 = 1;
+    TRUE                  = 2;
+}

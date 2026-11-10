@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package protos.addressing.zones.firstmile;
+
+option java_package = "co.ninjavan.protos.addressing.zones.firstmile";
+option java_outer_classname = "FirstMileZoneEventProto";
+option go_package = "bitbucket.ninjavan.co/ad/addressing-protos/go/zones/firstmile";
+
+import "common/metadata.proto";
+import "zones/firstmile/events/created.proto";
+import "zones/firstmile/events/updated.proto";
+import "zones/firstmile/events/deleted.proto";
+
+message FirstMileZoneEvent {
+  commons.common.Metadata     metadata                = 1;
+  int64                       zone_id                 = 2;
+  int64                       legacy_zone_id          = 3;
+  
+  oneof event {
+    events.Created  created   = 101;
+    events.Updated  updated   = 102;
+    events.Deleted  deleted   = 103;
+  }
+}
+

@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package protos.commons.common;
+
+import "common/boolean.proto";
+
+option java_package = "co.ninjavan.protos.commons";
+option go_package = "bitbucket.ninjavan.co/protos/proto-commons/go/common";
+option java_outer_classname = "UpdateCommonProto";
+
+message UpdateString {
+    string oldValue = 1;
+    string newValue = 2;
+}
+
+message UpdateDouble {
+    double oldValue = 1;
+    double newValue = 2;
+}
+
+message UpdateInteger {
+    int32 oldValue = 1;
+    int32 newValue = 2;
+}
+
+message UpdateLong {
+    int64 oldValue = 1;
+    int64 newValue = 2;
+}
+
+message UpdateBoolean {
+    Boolean oldValue = 1;
+    Boolean newValue = 2;
+}

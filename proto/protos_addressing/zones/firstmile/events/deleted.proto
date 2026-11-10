@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package protos.addressing.zones.firstmile.events;
+
+option java_package = "co.ninjavan.protos.addressing.zones.firstmile.events";
+option java_outer_classname = "DeletedProto";
+option go_package = "bitbucket.ninjavan.co/ad/addressing-protos/go/zones/firstmile/events";
+
+import "zones/firstmile/enums/zone_type.proto";
+
+message Deleted {
+  string            name                      = 1;
+  enums.ZoneType    zone_type                 = 2;
+  int64             hub_id                    = 3;
+  string            short_name                = 4;
+  string            description               = 5;
+  double            latitude                  = 6;
+  double            longitude                 = 7;
+  string            polygon                   = 8;
+  optional string   tag_name                  = 9;
+  repeated int64    shipper_ids               = 10;
+}
+
